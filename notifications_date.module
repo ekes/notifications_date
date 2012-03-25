@@ -1,0 +1,152 @@
+<?php
+
+/**
+ * @file
+ *   Add a notifications content event for date field.
+ */
+
+/**
+ * Implements hook_notifications().
+ */
+function notifications_date_notifications($op, &$arg0, $arg1 = NULL, $arg2 = NULL) {
+  switch ($op) {
+      case 'event types':
+        $types[] = array(
+          'type' => 'node',
+          'action' => 'date',
+          'name' => t('[type-name]: [title]'),
+          'title' => t('Notification of [type-name] upcoming'),
+          'digest' => array('node', 'nid'),
+          'description' => t('Node upcoming'),
+        );
+        return $types;
+   }
+}
+
+/**
+ * Implements hook_messaging().
+ */
+function notifications_date_messaging($op, $arg1 = NULL, $arg2 = NULL, $arg3 = NULL, $arg4 = NULL) {
+  switch ($op) {
+    case 'message groups':
+      $info['notifications-event-node-date'] = array(
+        'module' => 'notifications_date',
+        'name' => t('Notifications for node date upcoming'),
+        'description' => t('Notifications produced when a date field is upcoming.'),
+        'help' => t('TODO: As node events?'),
+        'fallback' => 'notifications-event-node',
+      );
+      return $info;
+
+    case 'message keys':
+      $type = $arg1;
+      switch ($type) {
+        case 'notifications-event-node-date':
+          return array(
+            'subject' => t('Subject'),
+            'main' => t('Content'),
+            'digest' => t('Digest line'),
+          );
+      }
+      break;
+
+    case 'messages':
+      $type = $arg1;
+      switch ($type) {
+        case 'notifications-event-node-date':
+          return array(
+            'subject' => t('Upcoming [type-name]: [title]'),
+            'main' => array(
+              '[node-teaser]',
+              t('Read more [node-url]'),
+            ),
+            'digest' => array(
+              '[title]',
+              'Read more [node-url]',
+            ),
+          );
+      }
+
+    case 'tokens':
+      // this section c&p from content_notifications
+      // TODO: does that section add anyway
+      // TODO: there's comment stuff we don't need here
+      // TODO: is there a date token we can add
+      $type = explode('-', $arg1) + array(2 => '', 3 => '');
+      $tokens = array();
+      // These are the token groups that will be used for this module's messages
+      if ($type[0] == 'notifications' && $type[2] == 'node') {
+        if ($type[1] == 'event') {
+          $tokens[] = 'node';
+          if ($type[3] == 'comment') {
+            $tokens[] = 'comment';
+          }
+        }
+        elseif ($type[1] == 'digest')  {
+          if ($type[3] == 'nid') {
+            $tokens[] = 'node';
+          }
+          elseif ($type[3] == 'type') {
+            // Special format for isolated tokens: array('token type', 'token id'). 
+            // In this case, as messages are digested by node type the only common element will be node-type
+            $tokens[] = array('node', 'type-name');
+          }
+        }
+      }
+      return $tokens;
+  }
+}
+
+/**
+ * Implements hook_cron().
+ */
+function notifications_date_cron() {
+  // TODO: Configurable.
+  $field_name = 'field_date';
+  $upcoming = '+1 day';
+
+  // Find all nodes that could trigger a notification.
+  $field = content_fields($field_name);
+  $store = content_database_info($field);
+  $sql = 'SELECT n.nid FROM {node} n INNER JOIN {' . $store['table'] . '} d ON n.vid = d.vid WHERE ';
+  $store_field = 'd.' . $store['columns']['value']['column'];
+
+  // Use a date_handler handle timezone, format etc.
+  require_once('./'. drupal_get_path('module', 'date_api') .'/date_api_sql.inc');
+  $date_handler = new date_sql_handler();
+  $date_handler->construct($field['type']);
+  $format = 'Y-m-d H:i:s'; // we don't need to change by granularity do we
+  // Could not have been notified last cron call.
+  $date = date_make_date(variable_get('cron_last', 0), NULL, DATE_UNIX);
+  $date->modify($upcoming);
+  $value = date_format_date($date, 'custom', DATE_FORMAT_DATETIME);
+  $sql .= $date_handler->sql_where_format($format, $store_field, '>', $value);
+  $sql .= ' AND ';
+  // Is within the upcoming period from now.
+  $date = date_make_date('now');
+  $date->modify($upcoming);
+  $value = date_format_date($date, 'custom', DATE_FORMAT_DATETIME);
+  $sql .= $date_handler->sql_where_format($format, $store_field, '<=', $value);
+
+  // @todo this will not catch dates that are within the period but posted after
+  // the cron trigger window.
+
+  $result = db_query($sql);
+  while ($row = db_fetch_array($result)) {
+    // trigger any date notifications that are required.
+    $node = node_load($row);
+    $event = array(
+      'module' => node,
+      'oid' => $node->nid,
+      'type' => 'node',
+      'action' => 'date',
+      'node' => $node,
+      'params' => array('nid' => $node->nid),
+    );
+print "\nNotifying\n";
+print_r($event);
+    notifications_event($event);
+  }
+
+  print "done\n";
+}

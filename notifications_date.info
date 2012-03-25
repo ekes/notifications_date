@@ -1,0 +1,6 @@
+name = Content Date Notifications
+description = Allows users to subscribe to content event based on date field.
+package = "Notifications"
+dependencies[] = notifications
+dependencies[] = date
+core = 6.x
