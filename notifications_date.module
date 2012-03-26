@@ -143,10 +143,6 @@ function notifications_date_cron() {
       'node' => $node,
       'params' => array('nid' => $node->nid),
     );
-print "\nNotifying\n";
-print_r($event);
     notifications_event($event);
   }
-
-  print "done\n";
 }
